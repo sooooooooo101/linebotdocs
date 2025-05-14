@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: linebot-app
+    env: python
+    buildCommand: ""
+    startCommand: gunicorn app:app

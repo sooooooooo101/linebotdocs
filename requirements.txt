@@ -7,6 +7,3 @@ google-auth-httplib2==0.1.0
 google-api-python-client==2.43.0
 fastapi==0.95.1
 uvicorn==0.23.1
-line-bot-sdk
-uvicorn
-linebot.v3

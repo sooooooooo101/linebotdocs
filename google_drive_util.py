@@ -28,7 +28,7 @@ except json.JSONDecodeError:
 # GOOGLE_DRIVE_FOLDER_ID も環境変数から取得
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
 
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
+SCOPES = ['https://www.googleapis.com/auth/drive.file'] # drive.file スコープはアップロードと共有設定に必要
 
 
 def get_drive_service():
@@ -43,13 +43,14 @@ def get_drive_service():
         raise # 資格情報取得やサービスビルドに失敗した場合は処理を中断
 
 
-def upload_image_to_drive(image_data: bytes, file_name: str):
-    if not image_data:
-        # image_dataがNoneまたは空の場合はアップロードしない
-        return None, None
+# 関数名を upload_file_to_drive に変更し、mime_type 引数を追加
+def upload_file_to_drive(file_data: bytes, file_name: str, mime_type: str):
+    if not file_data:
+        # file_data がNoneまたは空の場合はアップロードしない
+        return None, None, None # file_id, direct_link, webview_link を返すようにする
 
     service = get_drive_service()
-    metadata = {'name': file_name, 'mimeType': 'image/jpeg'}
+    metadata = {'name': file_name, 'mimeType': mime_type} # MIME タイプを引数から取得
 
     # GOOGLE_DRIVE_FOLDER_ID が設定されていれば、そのフォルダにアップロード
     if GOOGLE_DRIVE_FOLDER_ID:
@@ -57,24 +58,25 @@ def upload_image_to_drive(image_data: bytes, file_name: str):
         metadata['parents'] = [GOOGLE_DRIVE_FOLDER_ID]
         print(f"Uploading to Drive folder: {GOOGLE_DRIVE_FOLDER_ID}", file=sys.stderr) # デバッグログ
 
-    media = MediaIoBaseUpload(io.BytesIO(image_data), mimetype='image/jpeg', resumable=True)
+    media = MediaIoBaseUpload(io.BytesIO(file_data), mimetype=mime_type, resumable=True) # MIME タイプを引数から取得
     try:
         # Drive APIでファイルをアップロード
-        print(f"Attempting to upload file: {file_name}", file=sys.stderr) # デバッグログ
+        print(f"Attempting to upload file: {file_name} with MIME type {mime_type}", file=sys.stderr) # デバッグログ
+        # webViewLink も取得する fields='id,webContentLink,webViewLink'
         file = service.files().create(
             body=metadata,
             media_body=media,
-            fields='id,webContentLink' # アップロード後にIDとwebContentLinkを取得
+            fields='id,webContentLink,webViewLink'
         ).execute()
 
         file_id = file.get('id')
-        direct_link = file.get('webContentLink')
+        direct_link = file.get('webContentLink') # ダイレクトダウンロードリンク (画像などに多い)
+        webview_link = file.get('webViewLink') # Google Drive 上でファイルを開くリンク
 
-        print(f"Upload successful. Raw file_id: {file_id}, webContentLink: {direct_link}", file=sys.stderr) # デバッグログ
+        print(f"Upload successful. Raw file_id: {file_id}, webContentLink: {direct_link}, webViewLink: {webview_link}", file=sys.stderr) # デバッグログ
 
 
-        # --- ここから修正 ---
-        # permissions().create に渡す前に、file_idが文字列であり、余計なパラメータが付いていないか確認・修正
+        # --- file_id のクリーンアップ処理 (念のため残す) ---
         cleaned_file_id = file_id
         if isinstance(file_id, str):
              # ファイルID文字列に'?'が含まれている場合、それ以降を切り捨てる
@@ -82,19 +84,25 @@ def upload_image_to_drive(image_data: bytes, file_name: str):
 
         # 念のため、 cleaned_file_id が空になっていないか、Noneでないかを確認
         if not cleaned_file_id:
-            raise Exception(f"Cleaned file ID is invalid or empty: {cleaned_file_id}")
+            # file_idが取得できない場合は、その後の共有設定もリンク生成もできない
+             raise Exception(f"File ID is invalid or empty after upload: {file_id}")
 
         print(f"DEBUG: Cleaned file_id before permissions call: {cleaned_file_id}", file=sys.stderr) # デバッグログ
-        # --- ここまで修正 ---
+        # --- クリーンアップ処理 ここまで ---
 
 
-        # webContentLink が取得できない場合（Google側の仕様変更などで）の代替手段
-        if not direct_link and cleaned_file_id: # 代替リンク生成にも cleaned_file_id を使用
+        # webContentLink が取得できない場合（動画など）の代替手段
+        # 動画の場合は webContentLink がないことが多いので、webViewLink を主に使う
+        if not direct_link and cleaned_file_id:
+             # ファイルIDがあれば、uc?export=view 形式のリンクを生成 (画像向きだが動画でも試せる)
              direct_link = f"https://drive.google.com/uc?export=view&id={cleaned_file_id}"
              print(f"Warning: webContentLink not available, using fallback direct link: {direct_link}", file=sys.stderr)
-        elif not direct_link and not cleaned_file_id:
-             # IDもリンクも取得できない場合はエラー
-             raise Exception("File ID and webContentLink not returned after Drive upload.")
+        # webViewLink も重要なリンクとして返す
+        if not webview_link and cleaned_file_id:
+             # webViewLink がない場合の代替
+             webview_link = f"https://drive.google.com/open?id={cleaned_file_id}"
+             print(f"Warning: webViewLink not available, using fallback webViewLink: {webview_link}", file=sys.stderr)
+
 
         # アップロードしたファイルを「リンクを知っている全員が閲覧可能」に設定
         # 修正した cleaned_file_id を使用
@@ -102,7 +110,7 @@ def upload_image_to_drive(image_data: bytes, file_name: str):
             try:
                 print(f"Attempting to set permissions for file ID: {cleaned_file_id}", file=sys.stderr) # デバッグログ
                 service.permissions().create(
-                    fileId=cleaned_file_id, # **修正箇所: cleaned_file_id を渡す**
+                    fileId=cleaned_file_id, # cleaned_file_id を渡す
                     body={'type':'anyone','role':'reader'},
                     fields='id' # 作成されたpermissionのIDを取得（必須ではない）
                 ).execute()
@@ -115,7 +123,7 @@ def upload_image_to_drive(image_data: bytes, file_name: str):
                  print(f"Unexpected error during permission setting for file ID {cleaned_file_id}: {perm_exception}", file=sys.stderr)
 
 
-        return cleaned_file_id, direct_link # 戻り値のファイルIDも cleaned なものにする
+        return cleaned_file_id, direct_link, webview_link # file_id, direct_link, webview_link を返す
 
     except HttpError as e:
         print(f"Drive API Error during upload or permission setting: {e}", file=sys.stderr)

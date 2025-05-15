@@ -19,7 +19,7 @@ if not CREDENTIALS_JSON_STRING:
 
 # JSON文字列をPython辞書にパースする
 try:
-    CREDENTIALS_INFO = json.loads(CREDENTIALS_érés_JSON_STRING)
+    CREDENTIALS_INFO = json.loads(CREDENTIALS_JSON_STRING)
 except json.JSONDecodeError:
     raise ValueError("Failed to decode CREDENTIALS_JSON. Ensure it is valid JSON.")
 

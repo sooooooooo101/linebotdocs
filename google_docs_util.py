@@ -49,33 +49,48 @@ def send_google_doc(document_id: str, text=None, image_uri=None):
         raise # 資格情報取得やサービスビルドに失敗した場合は処理を中断
 
     requests = []
-    # --- 末尾追記のための変更 ---
+    # --- 末尾追記のためのロジック ---
     # ドキュメントの末尾位置を取得
+    end_index = 1 # ドキュメントが完全に空の場合のデフォルト位置
+
     try:
-        # fields='body(content)' ではなく fields='body' に変更し、document['body']['endIndex'] を参照
-        document = service.documents().get(documentId=document_id, fields='body').execute()
+        # ドキュメントのコンテンツボディのみを取得
+        document = service.documents().get(documentId=document_id, fields='body(content)').execute()
 
-        # ドキュメントボディ全体の endIndex を取得
-        # document['body'] が存在しない場合や endIndex がない場合はデフォルトで1（先頭）
-        end_index = document.get('body', {}).get('endIndex', 1)
+        # コンテンツリストを取得
+        content = document.get('body', {}).get('content')
 
-        # 安全のため、取得した endIndex が 1 より小さい場合は 1 とする
-        end_index = max(1, end_index)
+        # コンテンツが空でなく、最後の要素に endIndex が存在する場合
+        # body.content の最後の StructuralElement の endIndex が、ドキュメント全体の末尾のインデックスとなります。
+        if content and content[-1] and content[-1].get('endIndex') is not None:
+             end_index = content[-1]['endIndex']
+             # Docs API のインデックスは 1 から始まるため、endIndex は常に 1 以上です。
+             # 念のため最小値を 1 としますが、通常不要です。
+             end_index = max(1, end_index)
+             print(f"DEBUG: ドキュメント末尾位置 (body.content[-1].endIndex) を取得しました: {end_index}", file=sys.stderr)
+        else:
+             # ドキュメントが完全に空の場合や、content 構造が想定外の場合
+             # この場合、end_index は初期値の 1 のままとなります。
+             print("DEBUG: ドキュメントコンテンツが空または構造が想定外のため、末尾位置を 1 に設定しました。", file=sys.stderr)
 
-        print(f"DEBUG: Documentボディ全体の endIndex を取得しました: {end_index}", file=sys.stderr)
-
-        loc = {'index': end_index} # 末尾のインデックスを挿入位置に設定
 
     except HttpError as e:
-        print(f"Docs API Error while getting document end index: {e}", file=sys.stderr)
-        # 末尾追記位置の取得に失敗した場合、エラーとして扱い、呼び出し元に伝える
-        raise ValueError(f"Failed to get document end index: {e}")
+        # ドキュメント取得時の API エラー (404 Not Found や 403 Permission Denied など)
+        # このエラーが発生した場合、末尾追記はできません。
+        print(f"Docs API Error while getting document for end index: {e}", file=sys.stderr)
+        # エラーを再度発生させ、呼び出し元に伝える
+        raise ValueError(f"Failed to get document body content for end index: {e}")
     except Exception as e:
+         # その他の予期しないエラー
          print(f"An unexpected error occurred while getting document end index: {e}", file=sys.stderr)
          raise ValueError(f"Failed to get document end index: {e}")
-    # --- 末尾追記のための変更 ここまで ---
+
+    # 挿入位置を設定
+    loc = {'index': end_index}
+    # --- 末尾追記のためのロジック ここまで ---
 
 
+    # BatchUpdate のリクエストボディを作成
     if text:
         # テキストの後に改行を自動的に追加（末尾追記なので新しい行として追記されるのが自然）
         text_to_insert = text + '\n'
@@ -83,7 +98,7 @@ def send_google_doc(document_id: str, text=None, image_uri=None):
             'insertText': {'location': loc, 'text': text_to_insert}
         })
     else:
-        # 画像埋め込みの場合も末尾に挿入されるようになる
+        # 画像埋め込みの場合も末尾に挿入される
         # 画像の後にも改行を追加したい場合は、別途 insertText リクエストを追加する必要がありますが、
         # ここでは画像単体を末尾に貼り付けます。
         requests.append({
@@ -97,12 +112,19 @@ def send_google_doc(document_id: str, text=None, image_uri=None):
             }
         })
 
+    # BatchUpdate リクエストを実行
     try:
         service.documents().batchUpdate(
             documentId=document_id,
             body={'requests': requests}
         ).execute()
+        # 成功したら編集リンクを返す
         return f"https://docs.google.com/document/d/{document_id}/edit"
     except HttpError as e:
+        # batchUpdate 実行時の API エラー
         print(f"Docs API Error during batchUpdate: {e}", file=sys.stderr)
         raise # APIエラーは呼び出し元に伝える
+    except Exception as e:
+         # その他の予期しないエラー
+         print(f"An unexpected error occurred during Docs batchUpdate: {e}", file=sys.stderr)
+         raise # その他の予期しないエラーも呼び出し元に伝える

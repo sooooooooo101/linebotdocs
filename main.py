@@ -126,7 +126,7 @@ def handle_text(event: MessageEvent):
         doc_id = get_user_doc_id(user_id, db)
 
         if not doc_id:
-            reply = f"ドキュメントが設定されていません。\n書き込みたいGoogleドキュメントIDを '!setdoc [ドキュメントID]' コマンドで指定してください。"
+            reply = f"ドキュメントが設定されていません。\n書き込みたいGoogleドキュメントIDを '!setdoc [ドキュメントID]' コマンドで指定してください。\n使用したいドキュメントに「google-bot@gen-lang-client-0327920278.iam.gserviceaccount.com」を共有してください。"
             _reply_line(reply_token, reply)
             return # ドキュメントIDが設定されていない場合は書き込み処理をスキップ
 

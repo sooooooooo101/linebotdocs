@@ -19,7 +19,7 @@ if not CREDENTIALS_JSON_STRING:
 
 # JSON文字列をPython辞書にパースする
 try:
-    CREDENTIALS_INFO = json.loads(CREDENTIALS_JSON_STRING)
+    CREDENTIALS_INFO = json.loads(CREDENTIALS_érés_JSON_STRING)
 except json.JSONDecodeError:
     raise ValueError("Failed to decode CREDENTIALS_JSON. Ensure it is valid JSON.")
 
@@ -61,46 +61,51 @@ def send_google_doc(document_id: str, text=None, image_uri=None):
         content = document.get('body', {}).get('content')
 
         # コンテンツが空でなく、最後の要素に endIndex が存在する場合
-        # body.content の最後の StructuralElement の endIndex が、ドキュメント全体の末尾のインデックスとなります。
         if content and content[-1] and content[-1].get('endIndex') is not None:
              end_index = content[-1]['endIndex']
-             # Docs API のインデックスは 1 から始まるため、endIndex は常に 1 以上です。
-             # 念のため最小値を 1 としますが、通常不要です。
-             end_index = max(1, end_index)
-             print(f"DEBUG: ドキュメント末尾位置 (body.content[-1].endIndex) を取得しました: {end_index}", file=sys.stderr)
-        else:
-             # ドキュメントが完全に空の場合や、content 構造が想定外の場合
-             # この場合、end_index は初期値の 1 のままとなります。
-             print("DEBUG: ドキュメントコンテンツが空または構造が想定外のため、末尾位置を 1 に設定しました。", file=sys.stderr)
+             end_index = max(1, end_index) # 念のため最小値を 1 に
 
+
+        print(f"DEBUG: ドキュメント末尾位置 (body.content[-1].endIndex) を取得しました: {end_index}", file=sys.stderr)
 
     except HttpError as e:
         # ドキュメント取得時の API エラー (404 Not Found や 403 Permission Denied など)
-        # このエラーが発生した場合、末尾追記はできません。
         print(f"Docs API Error while getting document for end index: {e}", file=sys.stderr)
-        # エラーを再度発生させ、呼び出し元に伝える
         raise ValueError(f"Failed to get document body content for end index: {e}")
     except Exception as e:
-         # その他の予期しないエラー
          print(f"An unexpected error occurred while getting document end index: {e}", file=sys.stderr)
          raise ValueError(f"Failed to get document end index: {e}")
 
-    # 挿入位置を設定
-    loc = {'index': end_index}
-    # --- 末尾追記のためのロジック ここまで ---
+    # --- 末尾追記のための改行挿入とコンテンツ挿入 ---
+    # BatchUpdate リクエストリストを構築
+
+    # 1. 現在の末尾位置に改行を挿入するリクエスト
+    requests.append({
+        'insertText': {
+            'location': {'index': end_index},
+            'text': '\n' # 改行文字を挿入
+        }
+    })
+    print(f"DEBUG: リクエスト1: 末尾位置 {end_index} に改行を挿入", file=sys.stderr)
 
 
-    # BatchUpdate のリクエストボディを作成
+    # 2. 改行が挿入された「次の位置」に、目的のコンテンツを挿入するリクエスト
+    # 改行を挿入すると、元の end_index の位置に改行が入り、新しい末尾位置は end_index + 1 になります。
+    content_insert_index = end_index + 1
+    print(f"DEBUG: リクエスト2: 次の位置 {content_insert_index} にコンテンツを挿入", file=sys.stderr)
+
+    loc = {'index': content_insert_index} # 新しい挿入位置は改行の次
+
     if text:
         # テキストの後に改行を自動的に追加（末尾追記なので新しい行として追記されるのが自然）
-        text_to_insert = text + '\n'
+        # ただし、直前に改行を挿入したので、ここでさらに改行を付けるかどうかは好みに応じる
+        # ここではテキスト自体の末尾には改行を付けず、独立した行として追記されるようにする
+        text_to_insert = text # + '\n' # 直前に改行を挿入したのでここでは不要な場合が多い
         requests.append({
             'insertText': {'location': loc, 'text': text_to_insert}
         })
     else:
-        # 画像埋め込みの場合も末尾に挿入される
-        # 画像の後にも改行を追加したい場合は、別途 insertText リクエストを追加する必要がありますが、
-        # ここでは画像単体を末尾に貼り付けます。
+        # 画像埋め込みの場合も同じく新しい位置に挿入
         requests.append({
             'insertInlineImage': {
                 'location': loc,
@@ -111,6 +116,8 @@ def send_google_doc(document_id: str, text=None, image_uri=None):
                 }
             }
         })
+    # --- 末尾追記のための変更 ここまで ---
+
 
     # BatchUpdate リクエストを実行
     try:

@@ -14,17 +14,13 @@ if not CREDENTIALS_JSON_STRING:
 
 # JSON文字列をPython辞書にパースする
 try:
-    # 注: CREDENTIALS_érés_JSON_STRING のスペルミスを修正しました
     CREDENTIALS_INFO = json.loads(CREDENTIALS_JSON_STRING)
 except json.JSONDecodeError:
     raise ValueError("Failed to decode CREDENTIALS_JSON. Ensure it is valid JSON.")
 
 
 # DOCUMENT_ID は呼び出し元から受け取るように変更
-# DOCUMENT_ID はコード内に残っていますが、main.py から渡されるものを優先します。
-# もしこのファイルを単独でテストする場合などは必要になります。
 # 今回のシステム構成では main.py が document_id を渡すので、ここではデフォルト値やハードコードは不要です。
-# ただし、後方互換性や単独テストのために残す場合は注意深く管理してください。
 # 例：DOCUMENT_ID = os.environ.get('GOOGLE_DOC_ID') # 環境変数から読むなど
 
 
@@ -51,36 +47,43 @@ def send_google_doc(document_id: str, text=None, image_uri=None):
 
     requests = []
     # --- 末尾追記のためのロジック ---
-    # ドキュメントボディ全体の末尾位置を取得
+    # ドキュメントの末尾位置を取得
     end_index = 1 # ドキュメントが完全に空の場合や取得失敗時のデフォルト位置
 
     try:
-        # ドキュメントボディ全体を取得 (fields='body')
-        # body オブジェクトには endIndex プロパティが含まれます。
-        document = service.documents().get(documentId=document_id, fields='body').execute()
+        # ドキュメントボディ全体の endIndex を取得 (前回のエラーが出た方法)
+        # または body(content) の最後の要素の endIndex (その前のエラーが出た方法)
+        # Docs API の挙動が不安定なため、複数の取得方法を試す必要があるかもしれません。
+        # 今回は、body(content) を取得し、最後の要素の endIndex を取得する方法を再度試します。
+        # そして、取得した値から 1 を引いた値を挿入位置として試します。
 
-        # ドキュメントボディの endIndex プロパティから末尾インデックスを取得
-        # This should be the index immediately following the last character/element in the document
-        # Docs API v1 Guide: https://developers.google.com/docs/api/concepts/structure#end_index
-        # "For a Document object itself, the last index in the document."
-        end_index = document.get('body', {}).get('endIndex', 1)
+        document = service.documents().get(documentId=document_id, fields='body(content)').execute()
+        content = document.get('body', {}).get('content')
 
-        # Safety check: index must be at least 1
-        end_index = max(1, end_index)
+        if content and content[-1] and content[-1].get('endIndex') is not None:
+             end_index_api = content[-1]['endIndex']
+             # API から取得した endIndex をそのまま使うとエラーになる場合があるため
+             # ここで取得した endIndex から 1 を引いた値を挿入位置として試す
+             # ただし、結果が 0 以下にならないように調整 (インデックスは1から始まる)
+             end_index = max(1, end_index_api - 1)
 
-        print(f"DEBUG: ドキュメントボディ全体の endIndex を取得しました: {end_index}", file=sys.stderr)
+             print(f"DEBUG: APIから取得した endIndex: {end_index_api}, 挿入位置として試す値: {end_index}", file=sys.stderr)
+
+        else:
+             # ドキュメントが完全に空の場合など
+             end_index = 1 # 先頭に挿入
+             print("DEBUG: ドキュメントコンテンツが空または構造が想定外のため、末尾位置を 1 に設定しました。", file=sys.stderr)
+
 
     except HttpError as e:
         # ドキュメント取得時の API エラー (404 Not Found や 403 Permission Denied など)
-        # このエラーが発生した場合、末尾追記はできません。
-        print(f"Docs API Error while getting document body for end index: {e}", file=sys.stderr)
-        raise ValueError(f"Failed to get document body for end index: {e}")
+        print(f"Docs API Error while getting document end index: {e}", file=sys.stderr)
+        raise ValueError(f"Failed to get document body content for end index: {e}")
     except Exception as e:
-         # その他の予期しないエラー
-         print(f"An unexpected error occurred while getting document body: {e}", file=sys.stderr)
-         raise ValueError(f"Failed to get document body for end index: {e}")
+         print(f"An unexpected error occurred while getting document end index: {e}", file=sys.stderr)
+         raise ValueError(f"Failed to get document end index: {e}")
 
-    # 挿入位置を設定 - 取得したドキュメントボディ全体の endIndex を使用
+    # 挿入位置を設定
     loc = {'index': end_index}
     # --- 末尾追記のためのロジック ここまで ---
 
@@ -88,7 +91,6 @@ def send_google_doc(document_id: str, text=None, image_uri=None):
     # BatchUpdate リクエストリストを構築
     if text:
         # テキストの後に改行を自動的に追加（末尾追記なので新しい行として追記されるのが自然）
-        # 取得した endIndex が本当に末尾の挿入位置であれば、ここにテキスト+\n を挿入でOKのはず
         text_to_insert = text + '\n'
         requests.append({
             'insertText': {'location': loc, 'text': text_to_insert}

@@ -70,33 +70,52 @@ def upload_image_to_drive(image_data: bytes, file_name: str):
         file_id = file.get('id')
         direct_link = file.get('webContentLink')
 
-        print(f"Upload successful. File ID: {file_id}, webContentLink: {direct_link}", file=sys.stderr) # デバッグログ
+        print(f"Upload successful. Raw file_id: {file_id}, webContentLink: {direct_link}", file=sys.stderr) # デバッグログ
+
+
+        # --- ここから修正 ---
+        # permissions().create に渡す前に、file_idが文字列であり、余計なパラメータが付いていないか確認・修正
+        cleaned_file_id = file_id
+        if isinstance(file_id, str):
+             # ファイルID文字列に'?'が含まれている場合、それ以降を切り捨てる
+             cleaned_file_id = file_id.split('?')[0]
+
+        # 念のため、 cleaned_file_id が空になっていないか、Noneでないかを確認
+        if not cleaned_file_id:
+            raise Exception(f"Cleaned file ID is invalid or empty: {cleaned_file_id}")
+
+        print(f"DEBUG: Cleaned file_id before permissions call: {cleaned_file_id}", file=sys.stderr) # デバッグログ
+        # --- ここまで修正 ---
+
 
         # webContentLink が取得できない場合（Google側の仕様変更などで）の代替手段
-        if not direct_link and file_id:
-             # ファイルIDがあれば、uc?export=view 形式のリンクを生成
-             direct_link = f"https://drive.google.com/uc?export=view&id={file_id}"
+        if not direct_link and cleaned_file_id: # 代替リンク生成にも cleaned_file_id を使用
+             direct_link = f"https://drive.google.com/uc?export=view&id={cleaned_file_id}"
              print(f"Warning: webContentLink not available, using fallback direct link: {direct_link}", file=sys.stderr)
-        elif not direct_link and not file_id:
+        elif not direct_link and not cleaned_file_id:
              # IDもリンクも取得できない場合はエラー
              raise Exception("File ID and webContentLink not returned after Drive upload.")
 
         # アップロードしたファイルを「リンクを知っている全員が閲覧可能」に設定
-        if file_id:
+        # 修正した cleaned_file_id を使用
+        if cleaned_file_id:
             try:
-                print(f"Attempting to set permissions for file ID: {file_id}", file=sys.stderr) # デバッグログ
+                print(f"Attempting to set permissions for file ID: {cleaned_file_id}", file=sys.stderr) # デバッグログ
                 service.permissions().create(
-                    fileId=file_id,
+                    fileId=cleaned_file_id, # **修正箇所: cleaned_file_id を渡す**
                     body={'type':'anyone','role':'reader'},
                     fields='id' # 作成されたpermissionのIDを取得（必須ではない）
                 ).execute()
-                print(f"Successfully set permissions for file ID: {file_id}", file=sys.stderr)
+                print(f"Successfully set permissions for file ID: {cleaned_file_id}", file=sys.stderr)
             except HttpError as perm_error:
                  # 共有設定に失敗してもアップロード自体は成功しているので、処理は続行可能だがログを出す
-                 print(f"Failed to set permissions for file ID {file_id}: {perm_error}", file=sys.stderr)
+                 print(f"Failed to set permissions for file ID {cleaned_file_id}: {perm_error}", file=sys.stderr)
+            except Exception as perm_exception:
+                 # 想定外の例外もログに出力
+                 print(f"Unexpected error during permission setting for file ID {cleaned_file_id}: {perm_exception}", file=sys.stderr)
 
 
-        return file_id, direct_link
+        return cleaned_file_id, direct_link # 戻り値のファイルIDも cleaned なものにする
 
     except HttpError as e:
         print(f"Drive API Error during upload or permission setting: {e}", file=sys.stderr)

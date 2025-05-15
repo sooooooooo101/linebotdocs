@@ -17,7 +17,6 @@ from google_drive_util import upload_file_to_drive
 
 # データベースモジュールのインポートとテーブル作成
 from database import SessionLocal, UserDocMapping, create_tables
-from fastapi import FastAPI, Request, HTTPException
 
 # # .env ファイルから環境変数を読み込む
 # load_dotenv()

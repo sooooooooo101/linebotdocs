@@ -1,3 +1,4 @@
+# requirements.txt の例
 fastapi
 uvicorn[standard]
 python-dotenv
@@ -7,4 +8,5 @@ google-api-python-client
 google-auth
 google-auth-httplib2
 google-auth-oauthlib
-gunicorn  # <-- これを追加
+gunicorn
+psycopg2-binary  # PostgreSQL を使う場合に追加

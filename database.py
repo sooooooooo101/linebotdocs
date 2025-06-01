@@ -1,4 +1,5 @@
 # database.py
+
 import os
 import sys
 import logging
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------
 # 1. 環境変数から DATABASE_URL を取得
-#    - Render の PostgreSQL アドオンなどでは "postgres://..." で渡されることがある
+#    - Koyeb に設定された DATABASE_URL は通常 "postgres://..." 形式の場合がある
 #    - SQLAlchemy 2.0 以降では "postgresql://..." を期待するため、
 #      必要に応じて文字列置換を行う
 #    - ローカル開発時は環境変数が未設定の可能性があるため、
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------
 raw_url = os.environ.get("DATABASE_URL")
 if raw_url:
-    # Render や古い Heroku では "postgres://" を使ってくる場合があるので置換
+    # Koyeb や一部プロバイダでは "postgres://" を渡してくる場合があるので置換
     if raw_url.startswith("postgres://"):
         corrected = raw_url.replace("postgres://", "postgresql://", 1)
         logger.debug(f"`postgres://` を検知したため自動で `postgresql://` に置換しました: {corrected}")
@@ -30,7 +31,7 @@ if raw_url:
         DATABASE_URL = raw_url
     logger.debug(f"使用する DATABASE_URL: {DATABASE_URL}")
 else:
-    # 環境変数が設定されていないのでローカル用に SQLite を使う
+    # 環境変数が設定されていない場合はローカル開発用に SQLite を使用
     DATABASE_URL = "sqlite:///./app.db"
     logger.warning("DATABASE_URL が環境変数に設定されていません。ローカル開発用に SQLite を使用します。")
     logger.debug(f"フォールバックの DATABASE_URL: {DATABASE_URL}")
@@ -41,7 +42,7 @@ else:
 # ------------------------------------------------------------
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
-    # SQLite では同一スレッドチェックをオフにしないとエラーになる場合がある
+    # SQLite はマルチスレッドで使うとエラーになる場合があるのでチェックをオフにする
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 
 try:
@@ -72,8 +73,8 @@ class UserDocMapping(Base):
 
 # ------------------------------------------------------------
 # 5. テーブル作成関数
-#    - create_tables() を呼ぶと、まだテーブルが存在しなければ先に作成する
-#    - 失敗した場合はプロセスを終了
+#    - create_tables() を呼ぶと、まだテーブルが存在しなければ作成する
+#    - エラー発生時はプロセスを終了
 # ------------------------------------------------------------
 def create_tables():
     try:

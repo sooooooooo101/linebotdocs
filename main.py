@@ -511,3 +511,6 @@ if __name__ == '__main__':
         print(f"uvicorn main:app --reload --host 0.0.0.0 --port {port}", file=sys.stderr)
     except Exception as e:
         print(f"Error starting uvicorn server via 'python main.py': {e}", file=sys.stderr)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000)

@@ -1,10 +1,10 @@
-gunicorn==20.1.0
-line-bot-sdk
-google-auth==2.6.0
-google-auth-oauthlib==0.4.6
-google-auth-httplib2==0.1.0
-google-api-python-client==2.43.0
-fastapi==0.95.1
-uvicorn==0.23.1
-psycopg2-binary
+fastapi
+uvicorn[standard]
+python-dotenv
+line-bot-sdk>=3.0.0
 SQLAlchemy
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+gunicorn  # <-- これを追加

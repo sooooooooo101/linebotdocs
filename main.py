@@ -156,13 +156,11 @@ async def callback(request: Request):
         traceback.print_exc(file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Internal server error: {type(e).__name__}")
 
+from fastapi import Response
 
-# ヘルスチェック用のエンドポイント
-@app.get("/")
-async def health_check():
-    # 簡易的なヘルスチェック
-    return {"status": "ok"}
-
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(response: Response):
+    return {"message": "OK"}
 
 # メッセージハンドラ内でデータベースセッションを使用するためのヘルパー関数
 def get_db():
